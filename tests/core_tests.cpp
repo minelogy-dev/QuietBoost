@@ -1,0 +1,99 @@
+#include "platform.hpp"
+#include <shellapi.h>
+#include <fstream>
+#include <numeric>
+
+namespace {
+unsigned passed = 0;
+std::wstring report;
+void require(bool condition, const wchar_t* name) {
+    if (!condition) { report += L"FAIL: " + std::wstring(name) + L"\r\n"; throw std::runtime_error("A native check failed"); }
+    ++passed; report += L"PASS: " + std::wstring(name) + L"\r\n";
+}
+void nearValue(double actual, double expected, double epsilon, const wchar_t* name) { require(std::abs(actual - expected) < epsilon, name); }
+template<class Action> void throws(Action action, const wchar_t* name) { bool caught = false; try { action(); } catch (...) { caught = true; } require(caught, name); }
+void silence() {
+    double now = 0; qb::Settings settings; qb::GainControl gain(settings, [&] { return now; });
+    require(gain.automatic() && gain.target() == 1, L"每次启动默认开启保护且为 100%");
+    gain.setPercent(2000); now = 4.999; require(!gain.tick(), L"五秒前不复位");
+    now = 5; require(gain.tick(), L"没有音频回调时五秒复位"); nearValue(gain.target(), 1, 1e-10, L"复位至 100%");
+    require(!gain.tick() && gain.resets() == 1, L"复位不重复计数");
+    gain.setPercent(650); now = 9; gain.observe(.0001); now = 13; require(!gain.tick(), L"低声对白延长计时");
+    now = 14; require(gain.tick(), L"从最后有效信号开始计时");
+    gain.setPercent(800); gain.setAutomatic(false); now = 100; require(!gain.tick() && gain.target() == 8, L"关闭保护仅在当前会话保留增益");
+    gain.setAutomatic(true); require(gain.target() == 1, L"重新开启后立即检查超时");
+    qb::GainControl fresh(settings, [&] { return now; }); require(fresh.automatic() && fresh.target() == 1, L"新会话不继承关闭状态或当前增益");
+    fresh.setPercent(300); now = 104; fresh.observe(1e-10); now = 105; require(fresh.tick(), L"阈值以下噪声不阻止复位");
+    fresh.setPercent(300); now = 109; fresh.observe(std::numeric_limits<double>::quiet_NaN()); now = 110; require(fresh.tick(), L"NaN 不阻止复位");
+    throws([&] { fresh.setPercent(99); }, L"拒绝低于界面范围的增益");
+    throws([&] { fresh.setPercent(2001); }, L"默认上限有效");
+    throws([&] { fresh.setPercent(std::numeric_limits<double>::infinity()); }, L"拒绝无限增益");
+    qb::Settings extended; extended.maxGainPercent = 10000; qb::GainControl larger(extended); larger.setPercent(8000); nearValue(larger.target(), 80, 1e-10, L"配置可提高上限");
+    extended.maxGainPercent = -1; throws([&] { extended.validate(); }, L"拒绝负配置");
+    extended = {}; extended.silenceThresholdDb = std::numeric_limits<double>::quiet_NaN(); throws([&] { extended.validate(); }, L"拒绝非法静音阈值");
+}
+void dsp() {
+    qb::Dsp dsp(48000); float left = .01f, right = .01f;
+    for (int i = 0; i < 48000; ++i) { left = right = .01f; dsp.frame(left, right, 20); }
+    nearValue(left, .2, 1e-5, L"20 倍增益符合振幅定义"); nearValue(left, right, 1e-8, L"左右增益一致");
+    bool bounded = true, balanced = true; dsp.beginBlock();
+    for (int i = 0; i < 48000; ++i) { left = i % 2 ? .7f : -.7f; right = left / 2; dsp.frame(left, right, 20); bounded &= std::abs(left) <= .980001f && std::abs(right) <= .980001f; balanced &= std::abs(right / left - .5) < 1e-6; }
+    require(bounded, L"高信号不会超出限幅上限"); require(balanced, L"联动限幅保持声道比例"); require(dsp.limiting, L"报告限幅状态");
+    left = std::numeric_limits<float>::quiet_NaN(); right = std::numeric_limits<float>::infinity(); dsp.frame(left, right, 20); require(std::isfinite(left) && std::isfinite(right), L"非法样本不会传播到输出");
+    for (int i = 0; i < 48000; ++i) { left = right = .001f; dsp.frame(left, right, 1); } nearValue(left, .001, 1e-5, L"平滑回到原始增益");
+    qb::Dsp extreme(48000); bounded = true;
+    for (int i = 0; i < 48000; ++i) { left = right = 1; extreme.frame(left, right, 10000); bounded &= std::abs(left) <= .980001f; } require(bounded, L"超高配置增益仍受限幅约束");
+}
+void ring() {
+    qb::Ring queue(3); require(queue.pop().left == 0, L"空缓冲输出数字静音");
+    queue.push({1, 2}); queue.push({3, 4}); require(queue.size() == 2, L"正确记录缓冲帧数");
+    require(queue.pop().right == 2 && queue.pop().left == 3, L"缓冲先进先出");
+    for (int i = 0; i < 5; ++i) queue.push({static_cast<float>(i), 0});
+    require(queue.size() == 3 && queue.pop().left == 2, L"缓冲有界并丢弃最旧数据"); queue.clear(); require(queue.size() == 0 && queue.pop().left == 0, L"清理积压恢复空缓冲");
+}
+class FakeEndpoints : public qb::EndpointService {
+public:
+    std::vector<qb::Device> available{{L"a", L"A", false}, {L"b", L"B", false}, {L"v", L"V", true}};
+    std::wstring defaults[3]{L"v", L"v", L"comm"};
+    unsigned writes = 0; bool failWrites = false;
+    std::vector<qb::Device> list() override { return available; }
+    std::wstring current(int role) override { return defaults[role]; }
+    void select(const std::wstring& id, int role) override { if (failWrites) throw std::runtime_error("test"); defaults[role] = id; ++writes; }
+};
+void recovery() {
+    qb::Snapshot snapshot{L"v", L"a", L"a", L"b"}; FakeEndpoints service;
+    auto result = qb::restore(service, snapshot); require(result.success && service.defaults[0] == L"a" && service.defaults[1] == L"b", L"恢复各角色原设备");
+    require(service.defaults[2] == L"comm", L"通信默认设备不受影响");
+    service = {}; service.defaults[0] = service.defaults[1] = L"b"; result = qb::restore(service, snapshot); require(result.success && service.writes == 0, L"保留用户手动换设备的选择");
+    service = {}; service.available.erase(service.available.begin()); result = qb::restore(service, snapshot); require(result.success && service.defaults[0] == L"b", L"原设备断开时回退实际设备");
+    service = {}; service.available.erase(service.available.begin(), service.available.begin() + 2); result = qb::restore(service, snapshot); require(!result.success && service.writes == 0, L"无实际设备时不假报成功");
+    service = {}; service.failWrites = true; require(!qb::restore(service, snapshot).success, L"切换失败保留恢复条件");
+    service = {}; qb::restore(service, snapshot); service.writes = 0; require(qb::restore(service, snapshot).success && !service.writes, L"恢复操作幂等");
+}
+void config() {
+    auto directory = qb::fs::path(qb::executablePath()).parent_path() / L"test-state" / std::to_wstring(GetCurrentProcessId());
+    qb::StateStore store(directory); auto settings = store.loadSettings(); require(settings.maxGainPercent == 2000, L"创建默认配置");
+    settings.maxGainPercent = 8000; settings.virtualId = L"virtual-id"; settings.outputId = L"physical-id"; store.saveSettings(settings); auto loaded = store.loadSettings();
+    require(loaded.maxGainPercent == 8000 && loaded.virtualId == L"virtual-id" && loaded.outputId == L"physical-id", L"配置往返读取");
+    require(qb::readIni(store.config, L"QuietBoost", L"AutoRestore", L"absent") == L"absent", L"配置不保存关闭保护选项");
+    require(qb::readIni(store.config, L"QuietBoost", L"CurrentGain", L"absent") == L"absent", L"配置不保存当前增益");
+    qb::atomicWrite(store.config, L"[QuietBoost]\r\nMaxGainPercent=5000\r\nAutoRestore=0\r\n"); loaded = store.loadSettings(); qb::GainControl gain(loaded); require(gain.automatic(), L"忽略配置内伪造的关闭保护字段");
+    qb::Snapshot record{L"v", L"out", L"a", L"b", 123, 45678901234567}; store.saveSnapshot(record); auto restored = store.loadSnapshot();
+    require(restored.processTime == record.processTime && restored.consoleId == L"a", L"设备恢复记录完整保存 64 位进程时间");
+    qb::atomicWrite(store.config, L"[QuietBoost]\r\nMaxGainPercent=-2\r\n"); throws([&] { store.loadSettings(); }, L"无效配置禁止启动");
+    qb::fs::remove(store.config); qb::fs::remove(store.journal); qb::fs::remove(directory);
+}
+}
+int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
+    bool headless = std::wstring(GetCommandLineW()).find(L"--headless") != std::wstring::npos;
+    auto reportPath = qb::fs::path(qb::executablePath()).parent_path() / L"test-results.txt";
+    try {
+        qb::ComApartment apartment; silence(); dsp(); ring(); recovery(); config();
+        report += L"\r\n" + std::to_wstring(passed) + L" checks passed.\r\n"; qb::atomicWrite(reportPath, report);
+        if (!headless) MessageBoxW(nullptr, (std::to_wstring(passed) + L" 项检查通过。\n结果已保存到：\n" + reportPath.wstring()).c_str(), L"QuietBoost 测试", MB_OK | MB_ICONINFORMATION);
+        return 0;
+    } catch (const std::exception& e) {
+        report += L"FAIL: " + qb::wide(e.what()); try { qb::atomicWrite(reportPath, report); } catch (...) {}
+        if (!headless) MessageBoxW(nullptr, report.c_str(), L"QuietBoost 测试失败", MB_OK | MB_ICONERROR); return 1;
+    }
+}

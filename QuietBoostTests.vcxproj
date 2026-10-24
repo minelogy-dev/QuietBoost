@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup Label="ProjectConfigurations">
+    <ProjectConfiguration Include="Debug|x64"><Configuration>Debug</Configuration><Platform>x64</Platform></ProjectConfiguration>
+    <ProjectConfiguration Include="Release|x64"><Configuration>Release</Configuration><Platform>x64</Platform></ProjectConfiguration>
+  </ItemGroup>
+  <PropertyGroup Label="Globals"><VCProjectVersion>17.0</VCProjectVersion><ProjectGuid>{7B0F7B07-D0AC-4454-BD7B-E012155F1120}</ProjectGuid><Keyword>Win32Proj</Keyword><RootNamespace>QuietBoostTests</RootNamespace><WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion></PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+  <PropertyGroup Label="Configuration"><ConfigurationType>Application</ConfigurationType><PlatformToolset>v143</PlatformToolset><CharacterSet>Unicode</CharacterSet><UseDebugLibraries Condition="'$(Configuration)'=='Debug'">true</UseDebugLibraries></PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+  <PropertyGroup><OutDir>$(ProjectDir)out\$(Platform)\$(Configuration)\</OutDir><IntDir>$(ProjectDir)build\$(ProjectName)\$(Platform)\$(Configuration)\</IntDir><TargetName>QuietBoostTests</TargetName><LinkIncremental>false</LinkIncremental></PropertyGroup>
+  <ItemDefinitionGroup>
+    <ClCompile><WarningLevel>Level4</WarningLevel><SDLCheck>true</SDLCheck><ConformanceMode>true</ConformanceMode><LanguageStandard>stdcpp20</LanguageStandard><AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions><PreprocessorDefinitions>UNICODE;_UNICODE;WIN32_LEAN_AND_MEAN;NOMINMAX;_WIN32_WINNT=0x0A00;%(PreprocessorDefinitions)</PreprocessorDefinitions><AdditionalIncludeDirectories>$(ProjectDir)src;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories><RuntimeLibrary>MultiThreaded</RuntimeLibrary><RuntimeLibrary Condition="'$(Configuration)'=='Debug'">MultiThreadedDebug</RuntimeLibrary><ExceptionHandling>Sync</ExceptionHandling><DebugInformationFormat>ProgramDatabase</DebugInformationFormat><Optimization Condition="'$(Configuration)'=='Release'">MaxSpeed</Optimization></ClCompile>
+    <ResourceCompile><AdditionalIncludeDirectories>$(ProjectDir)src;$(ProjectDir)third_party\vbcable;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories></ResourceCompile>
+    <Link><SubSystem>Windows</SubSystem><GenerateDebugInformation>true</GenerateDebugInformation><AdditionalDependencies>ole32.lib;uuid.lib;user32.lib;comctl32.lib;shell32.lib;propsys.lib;advapi32.lib;avrt.lib;wintrust.lib;crypt32.lib;bcrypt.lib;gdiplus.lib;%(AdditionalDependencies)</AdditionalDependencies></Link>
+    <Manifest><AdditionalManifestFiles>$(ProjectDir)resources\app.manifest;%(AdditionalManifestFiles)</AdditionalManifestFiles></Manifest>
+  </ItemDefinitionGroup>
+  <ItemGroup><ClCompile Include="tests\core_tests.cpp"/><ClCompile Include="src\platform.cpp"/></ItemGroup><ItemGroup><ClInclude Include="src\core.hpp"/><ClInclude Include="src\platform.hpp"/></ItemGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+</Project>

@@ -1,0 +1,13 @@
+/.vs/
+/build/
+/out/
+/dist/
+/test-state/
+*.user
+*.suo
+*.pdb
+*.ilk
+*.obj
+*.log
+*.VC.db
+CMakeUserPresets.json

@@ -1,0 +1,38 @@
+#pragma code_page(65001)
+#include "resource.h"
+#include <windows.h>
+
+1 VERSIONINFO
+ FILEVERSION 2,0,0,0
+ PRODUCTVERSION 2,0,0,0
+ FILETYPE VFT_APP
+BEGIN
+ BLOCK "StringFileInfo"
+ BEGIN
+  BLOCK "040904B0"
+  BEGIN
+   VALUE "FileDescription", "QuietBoost Native Audio Gain\0"
+   VALUE "CompanyName", "minelogy-dev\0"
+   VALUE "Comments", "Maintained by minelogy-dev. AI-assisted development with OpenAI Codex.\0"
+   VALUE "FileVersion", "2.0.0\0"
+   VALUE "ProductName", "QuietBoost\0"
+   VALUE "ProductVersion", "2.0.0\0"
+  END
+ END
+ BLOCK "VarFileInfo"
+ BEGIN
+  VALUE "Translation", 0x0409, 1200
+ END
+END
+
+IDD_CONSENT DIALOGEX 0, 0, 300, 151
+STYLE DS_SETFONT | DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU
+CAPTION "关闭自动恢复 · 二次确认"
+FONT 10, "Microsoft YaHei UI"
+BEGIN
+ LTEXT "关闭后，静音结束或切换视频时，后续声音仍使用当前增益。", -1, 15, 14, 270, 30
+ LTEXT "仅本次运行有效；重新启动后自动恢复保护。限幅器保持开启。", -1, 15, 48, 270, 26
+ CONTROL "我了解，并希望本次运行保持增强", IDC_CONSENT, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 15, 86, 270, 18
+ PUSHBUTTON "保留自动恢复", IDCANCEL, 123, 119, 78, 22
+ PUSHBUTTON "本次关闭", IDC_CONFIRM, 211, 119, 73, 22
+END

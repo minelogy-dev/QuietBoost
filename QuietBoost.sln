@@ -1,0 +1,24 @@
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.0.31903.59
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{BC8A1FFA-BEE3-4634-8014-F334798102B3}") = "QuietBoost", "QuietBoost.vcxproj", "{0744BB08-4311-4FD1-95A2-C1155FF01110}"
+EndProject
+Project("{BC8A1FFA-BEE3-4634-8014-F334798102B3}") = "QuietBoostTests", "QuietBoostTests.vcxproj", "{7B0F7B07-D0AC-4454-BD7B-E012155F1120}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|x64 = Debug|x64
+		Release|x64 = Release|x64
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{0744BB08-4311-4FD1-95A2-C1155FF01110}.Debug|x64.ActiveCfg = Debug|x64
+		{0744BB08-4311-4FD1-95A2-C1155FF01110}.Debug|x64.Build.0 = Debug|x64
+		{0744BB08-4311-4FD1-95A2-C1155FF01110}.Release|x64.ActiveCfg = Release|x64
+		{0744BB08-4311-4FD1-95A2-C1155FF01110}.Release|x64.Build.0 = Release|x64
+		{7B0F7B07-D0AC-4454-BD7B-E012155F1120}.Debug|x64.ActiveCfg = Debug|x64
+		{7B0F7B07-D0AC-4454-BD7B-E012155F1120}.Debug|x64.Build.0 = Debug|x64
+		{7B0F7B07-D0AC-4454-BD7B-E012155F1120}.Release|x64.ActiveCfg = Release|x64
+		{7B0F7B07-D0AC-4454-BD7B-E012155F1120}.Release|x64.Build.0 = Release|x64
+	EndGlobalSection
+EndGlobal
