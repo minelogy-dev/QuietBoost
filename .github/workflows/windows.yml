@@ -1,0 +1,93 @@
+name: Windows build and release
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref_type != 'tag' }}
+
+jobs:
+  build:
+    name: Windows x64 / ${{ matrix.configuration }}
+    runs-on: windows-2022
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        configuration: [Debug, Release]
+    env:
+      BUILD_CONFIGURATION: ${{ matrix.configuration }}
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Configure native MSVC build
+        run: cmake --preset windows-x64
+      - name: Build with static C++ runtime
+        run: cmake --build build/cmake --config $env:BUILD_CONFIGURATION -- /m:1 /nodeReuse:false
+      - name: Run core and recovery tests
+        run: ctest --test-dir build/cmake -C $env:BUILD_CONFIGURATION --output-on-failure --no-tests=error
+      - name: Verify single EXE and embedded driver
+        if: matrix.configuration == 'Release'
+        run: ./scripts/Verify-Release.ps1 -Executable build/cmake/Release/QuietBoost.exe -OutputDirectory dist
+      - name: Upload verified release binary
+        if: matrix.configuration == 'Release'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: QuietBoost-windows-x64
+          path: |
+            dist/QuietBoost.exe
+            dist/SHA256SUMS.txt
+          if-no-files-found: error
+          retention-days: 30
+      - name: Upload validation reports
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: validation-${{ matrix.configuration }}
+          path: |
+            build/cmake/Testing/Temporary/LastTest.log
+            build/cmake/${{ matrix.configuration }}/test-results.txt
+            dist/*-report.txt
+          if-no-files-found: warn
+          retention-days: 14
+
+  release:
+    name: Publish GitHub Release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: QuietBoost-windows-x64
+          path: dist
+      - name: Publish verified assets
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]] || { echo 'Invalid release tag'; exit 1; }
+          version=$(sed -nE 's/^project\(QuietBoost VERSION ([0-9.]+) .*$/\1/p' CMakeLists.txt)
+          [[ "${RELEASE_TAG#v}" == "$version" || "${RELEASE_TAG#v}" == "$version-"* ]] || { echo 'Tag and project version differ'; exit 1; }
+          (cd dist && sha256sum --check SHA256SUMS.txt)
+          flags=()
+          if [[ "$RELEASE_TAG" == *-* ]]; then flags+=(--prerelease --latest=false); fi
+          gh release create "$RELEASE_TAG" dist/QuietBoost.exe dist/SHA256SUMS.txt \
+            --verify-tag --title "QuietBoost $RELEASE_TAG" --notes-file docs/RELEASE_NOTES.md "${flags[@]}"

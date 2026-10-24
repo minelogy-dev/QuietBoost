@@ -1,5 +1,9 @@
 # QuietBoost Native
 
+[![Windows build and release](https://github.com/minelogy-dev/QuietBoost/actions/workflows/windows.yml/badge.svg)](https://github.com/minelogy-dev/QuietBoost/actions/workflows/windows.yml)
+
+[下载 Release](https://github.com/minelogy-dev/QuietBoost/releases) · [构建与测试记录](https://github.com/minelogy-dev/QuietBoost/actions)
+
 由 [minelogy-dev](https://github.com/minelogy-dev) 维护，OpenAI Codex 作为 AI 开发协作者参与实现、测试和文档整理。协作署名见 [AUTHORS.md](AUTHORS.md)。
 
 Windows 10/11 x64 的原生音频增益工具。项目采用 C++20、Win32 和 WASAPI，使用 MSVC 静态运行库 `/MT`。发布物只有 **QuietBoost.exe**，不需要 .NET、NAudio、另行安装的 VC++ 运行库或脚本。
@@ -21,6 +25,8 @@ Visual Studio 中的 **Git 更改** 窗口可以查看差异、提交、创建�
 所需组件列于 `.vsconfig`：C++ 桌面开发工作负载、Windows SDK、MSVC v143 和 CMake 支持。VS 如果提示组件缺失，可直接在图形化安装器中补齐。
 
 ## 单 EXE 使用
+
+在 Releases 页面下载 **QuietBoost.exe**；预览版会明确标记 Pre-release。同页提供 `SHA256SUMS.txt` 校验文件。主程序目前尚未签名，Windows 可能显示未知发布者提示。
 
 直接运行 **QuietBoost.exe**。所有依赖的第三方虚拟驱动安装文件都嵌入资源中。
 
@@ -83,6 +89,16 @@ OutputDeviceId=
 - `tests/core_tests.cpp`：可从 Visual Studio 直接运行的图形测试程序。
 
 “静态”指程序自身 C/C++ 运行库静态链接；Win32、COM、WASAPI 等功能仍调用 Windows 自带的系统 DLL。程序没有自研、测试签名或绕过签名检查的驱动。
+
+## GitHub Actions 与发布（无需终端）
+
+推送 main 或创建 Pull Request 后，Actions 会在 Windows Server 2022 / Visual Studio 2022 上构建 Debug 和 Release，运行核心检查。Release 还会在空目录独立运行驱动验证命令，检查内置文件哈希、官方安装程序签名及 EXE 的系统 DLL 依赖。CI 不安装驱动、不接入音频、不切换输出设备。
+
+- 手动构建：仓库 **Actions → Windows build and release → Run workflow**。
+- 下载构建：打开成功运行记录，在 **Artifacts** 中下载 `QuietBoost-windows-x64`；ZIP 中只有 EXE 与校验文件。测试和签名验证报告单独保留。
+- 发布版本：先更新 `CMakeLists.txt`、`resources/app.rc`、`resources/app.manifest` 中的版本，以及 `docs/RELEASE_NOTES.md`。在 GitHub Desktop 提交并推送；打开 **History**，右键目标提交选择 **Create Tag**，填写 `v2.0.0-preview.1` 这类版本，再点击 **Push origin** 推送标签。
+
+`v*` 标签会触发全部检查；Debug 和 Release 均通过后才创建 GitHub Release，附带原始 `QuietBoost.exe` 与 `SHA256SUMS.txt`。含 `-preview.1` 等后缀的标签自动标记为预览版；版本主体必须与 CMake 版本一致。发布只使用该次任务的临时 `GITHUB_TOKEN`，无需个人访问令牌。已发布的版本不会被工作流覆盖。
 
 ## 第三方来源
 

@@ -49,3 +49,9 @@
 还需针对实际使用的播放器、蓝牙/USB/HDMI 输出、休眠唤醒、设备格式变化和长时间时钟漂移做验收。独占模式或绑定固定输出的应用可能不会跟随系统默认设备。
 
 首次安装内置虚拟驱动依然需要 Windows 管理员授权，并按 VB-Audio 的要求重启；这与主程序无需运行库、单 EXE 分发是不同的步骤。
+
+## CI 与发布检查（2026-10-25）
+
+新增 `.github/workflows/windows.yml`，覆盖 main 推送、Pull Request、手动运行和版本标签。Debug、Release 均执行 CTest；Release 在没有外部资源的临时目录运行 `--verify-driver`，检查系统 DLL 依赖、31 个嵌入文件的哈希及官方安装程序签名，再生成 EXE 校验文件。发布任务依赖两个构建任务全部成功。
+
+工作流经 actionlint 1.7.12 检查通过；`scripts/Verify-Release.ps1` 已在本机 Release 上执行通过，CTest 45 项检查再次通过。云端运行结果以仓库 Actions 记录为准。CI 检查不涉及驱动安装或实际音频输出，不能替代上述实机验收。
