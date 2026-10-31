@@ -54,6 +54,18 @@ VB-CABLE 为 VB-Audio / Vincent Burel 提供的 donationware。程序内的 **VB
 
 关闭窗口会收起到托盘；点击 **正式退出** 才结束程序。退出时先恢复增益，再恢复设备选择，最后停止转发。运行期间用户手动切换设备后，工具保留新的选择。原设备断开时尝试其他实际输出设备。
 
+## 悬浮窗与侧边条
+
+启动时默认显示置顶的 **悬浮控制**，可直接调整增益、恢复 100% 或打开主窗口。
+
+- 按住顶部“拖动移动”区域拖动；点击 **侧边条**，会收窄并贴到当前显示器最近的左侧或右侧。
+- 侧边条可拖动到另一侧或另一块显示器，松开后重新贴边；竖向滑块向上增大增益，点击 **展开** 回到悬浮窗。
+- 点击 **×** 只隐藏悬浮控制；通过主窗口的 **显示 / 隐藏悬浮窗** 或托盘右键菜单重新打开。
+- 隐藏或最小化主窗口后，悬浮控制仍可使用。正式退出时一同关闭。
+- 悬浮窗、侧边条与主窗口共用当前增益，静音自动恢复和快捷键复位会同步到所有界面。未开始音频转发时，增益滑块禁用。
+
+位置、形态和显示状态保存在工具自己的 `%LOCALAPPDATA%/QuietBoostNative/window.ini`。显示器断开或工作区变化后会将窗口移回可见区域。此文件只保存窗口布局，当前增益和关闭自动恢复的状态仍不持久化。
+
 同一个 EXE 以隐藏守护进程模式运行，在主进程异常终止后尝试恢复。主程序和守护进程同时被终止、断电等情况不能保证即时恢复，下次启动会再次读取恢复记录。某些绑定固定设备的播放器不能跟随默认设备切换，需在播放器内改为系统默认或重新开始播放。
 
 ## 配置
@@ -83,6 +95,7 @@ OutputDeviceId=
 - `src/audio.cpp`：原生 WASAPI 接收、输出和音频线程。
 - `src/platform.cpp`：设备枚举与切换、原子配置写入、守护进程和恢复记录。
 - `src/app.cpp`：原生 Win32 界面与托盘，不通过终端实现产品操作。
+- `src/floating.cpp`：可拖动的置顶悬浮窗与左右贴边侧边条。
 - `src/installer.cpp`：资源释放、完整性和签名检查、图形驱动安装入口。
 - `resources/`：界面资源、版本信息、应用 manifest 和驱动资源映射。
 - `third_party/vbcable/`：原始官方驱动文件，逐文件校验值见 `src/driver_resources.hpp`。
@@ -96,7 +109,7 @@ OutputDeviceId=
 
 - 手动构建：仓库 **Actions → Windows build and release → Run workflow**。
 - 下载构建：打开成功运行记录，在 **Artifacts** 中下载 `QuietBoost-windows-x64`；ZIP 中只有 EXE 与校验文件。测试和签名验证报告单独保留。
-- 发布版本：先更新 `CMakeLists.txt`、`resources/app.rc`、`resources/app.manifest` 中的版本，以及 `docs/RELEASE_NOTES.md`。在 GitHub Desktop 提交并推送；打开 **History**，右键目标提交选择 **Create Tag**，填写 `v2.0.0-preview.1` 这类版本，再点击 **Push origin** 推送标签。
+- 发布版本：先更新 `CMakeLists.txt`、`resources/app.rc`、`resources/app.manifest` 中的版本，以及 `docs/RELEASE_NOTES.md`。在 GitHub Desktop 提交并推送；打开 **History**，右键目标提交选择 **Create Tag**，填写 `v2.1.0-preview.1` 这类版本，再点击 **Push origin** 推送标签。
 
 `v*` 标签会触发全部检查；Debug 和 Release 均通过后才创建 GitHub Release，附带原始 `QuietBoost.exe` 与 `SHA256SUMS.txt`。含 `-preview.1` 等后缀的标签自动标记为预览版；版本主体必须与 CMake 版本一致。发布只使用该次任务的临时 `GITHUB_TOKEN`，无需个人访问令牌。已发布的版本不会被工作流覆盖。
 

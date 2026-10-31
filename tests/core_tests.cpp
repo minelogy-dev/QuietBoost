@@ -1,4 +1,7 @@
 #include "platform.hpp"
+#include "floating_layout.hpp"
+#include "floating.hpp"
+#include <commctrl.h>
 #include <shellapi.h>
 #include <fstream>
 #include <numeric>
@@ -83,12 +86,55 @@ void config() {
     qb::atomicWrite(store.config, L"[QuietBoost]\r\nMaxGainPercent=-2\r\n"); throws([&] { store.loadSettings(); }, L"无效配置禁止启动");
     qb::fs::remove(store.config); qb::fs::remove(store.journal); qb::fs::remove(directory);
 }
+void floatingLayout() {
+    RECT work{-1920, -120, 0, 920};
+    auto panel = qb::floatingBounds({-2200, -500, -1880, -304}, work, false, false);
+    require(panel.left == -1920 && panel.top == -120 && panel.right == -1600, L"悬浮窗适配负坐标显示器并保持可见");
+    panel = qb::floatingBounds({-20, 900, 300, 1096}, work, false, true);
+    require(panel.right == 0 && panel.bottom == 920, L"悬浮窗不超出任务栏工作区");
+    auto bar = qb::floatingBounds({-1000, 800, -894, 1160}, work, true, false);
+    require(bar.left == -1920 && bar.bottom == 920 && bar.right - bar.left == 106, L"侧边条贴左边并约束拖动高度");
+    bar = qb::floatingBounds({-1800, 20, -1694, 380}, work, true, true);
+    require(bar.right == 0 && bar.top == 20, L"侧边条贴右边并保留高度");
+    require(!qb::nearestRightEdge({-1800, 0, -1480, 196}, work) && qb::nearestRightEdge({-400, 0, -80, 196}, work), L"按当前显示器选择最近侧边");
+    panel = qb::floatingBounds({-1800, -120, -1480, 76}, {0, 0, 1920, 1040}, false, false);
+    require(panel.left == 0 && panel.top == 0, L"移除显示器后悬浮窗回到有效屏幕");
+}
+void floatingInteraction() {
+    INITCOMMONCONTROLSEX controls{sizeof(controls), ICC_BAR_CLASSES}; InitCommonControlsEx(&controls);
+    auto directory = qb::fs::path(qb::executablePath()).parent_path() / L"test-state" / (L"floating-" + std::to_wstring(GetCurrentProcessId()));
+    qb::StateStore store(directory); auto file = directory / L"window.ini";
+    qb::atomicWrite(file, L"[FloatingWindow]\r\nVisible=0\r\nX=-999999\r\nY=-999999\r\nCurrentGain=8000\r\nAutoRestore=0\r\n");
+    struct Parent { HWND handle = CreateWindowExW(0, L"STATIC", L"QuietBoost UI test", WS_POPUP, 0, 0, 320, 196, nullptr, nullptr, GetModuleHandleW(nullptr), nullptr); ~Parent() { DestroyWindow(handle); } } parent;
+    double requested = 0; unsigned resets = 0;
+    qb::FloatingWindow floating(store);
+    floating.create(parent.handle, 8000, false, [&](double value) { requested = value; }, [&] { ++resets; }, [] {});
+    HWND slider = FindWindowExW(floating.handle(), nullptr, TRACKBAR_CLASSW, nullptr);
+    require(!floating.visible() && slider && !IsWindowEnabled(slider), L"未转发时悬浮滑块禁用并恢复隐藏偏好");
+    floating.update(650, true, true);
+    require(IsWindowEnabled(slider) && requested == 0, L"主窗口同步增益不会触发悬浮窗反向调节");
+    SendMessageW(slider, WM_KEYDOWN, VK_RIGHT, 0);
+    require(requested > 650, L"悬浮窗向右键调高增益");
+    floating.setSidebar(true); slider = FindWindowExW(floating.handle(), nullptr, TRACKBAR_CLASSW, nullptr);
+    requested = 0; SendMessageW(slider, WM_KEYDOWN, VK_UP, 0);
+    require(requested > 650, L"侧边条向上键调高增益");
+    floating.update(100, true, true);
+    require(SendMessageW(slider, TBM_GETPOS, 0, 0) == 1000, L"自动恢复后侧边条同步到原始增益端");
+    HWND reset = FindWindowExW(floating.handle(), nullptr, L"BUTTON", L"恢复 100%"); SendMessageW(reset, BM_CLICK, 0, 0);
+    require(resets == 1, L"悬浮窗恢复按钮调用共用复位操作");
+    require(floating.visible() && !IsWindowVisible(parent.handle), L"隐藏主窗口不会隐藏独立悬浮窗");
+    floating.show(false); floating.destroy();
+    floating.create(parent.handle, 8000, false, [](double) {}, [] {}, [] {});
+    require(floating.sidebar() && !floating.visible(), L"重新创建后保留侧边条形态和隐藏状态");
+    require(qb::readIni(file, L"FloatingWindow", L"CurrentGain", L"absent") == L"absent" && qb::readIni(file, L"FloatingWindow", L"AutoRestore", L"absent") == L"absent", L"窗口布局文件不保留增益或关闭保护状态");
+    floating.destroy(); qb::fs::remove(file); qb::fs::remove(directory);
+}
 }
 int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
     bool headless = std::wstring(GetCommandLineW()).find(L"--headless") != std::wstring::npos;
     auto reportPath = qb::fs::path(qb::executablePath()).parent_path() / L"test-results.txt";
     try {
-        qb::ComApartment apartment; silence(); dsp(); ring(); recovery(); config();
+        qb::ComApartment apartment; silence(); dsp(); ring(); recovery(); config(); floatingLayout(); floatingInteraction();
         report += L"\r\n" + std::to_wstring(passed) + L" checks passed.\r\n"; qb::atomicWrite(reportPath, report);
         if (!headless) MessageBoxW(nullptr, (std::to_wstring(passed) + L" 项检查通过。\n结果已保存到：\n" + reportPath.wstring()).c_str(), L"QuietBoost 测试", MB_OK | MB_ICONINFORMATION);
         return 0;
