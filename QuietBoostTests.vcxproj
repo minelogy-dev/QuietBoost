@@ -15,6 +15,6 @@
     <Link><SubSystem>Windows</SubSystem><GenerateDebugInformation>true</GenerateDebugInformation><AdditionalDependencies>ole32.lib;uuid.lib;user32.lib;comctl32.lib;shell32.lib;propsys.lib;advapi32.lib;avrt.lib;wintrust.lib;crypt32.lib;bcrypt.lib;gdiplus.lib;%(AdditionalDependencies)</AdditionalDependencies></Link>
     <Manifest><AdditionalManifestFiles>$(ProjectDir)resources\app.manifest;%(AdditionalManifestFiles)</AdditionalManifestFiles></Manifest>
   </ItemDefinitionGroup>
-  <ItemGroup><ClCompile Include="tests\core_tests.cpp"/><ClCompile Include="src\platform.cpp"/><ClCompile Include="src\floating.cpp"/></ItemGroup><ItemGroup><ClInclude Include="src\core.hpp"/><ClInclude Include="src\platform.hpp"/><ClInclude Include="src\floating.hpp"/><ClInclude Include="src\floating_layout.hpp"/></ItemGroup>
+  <ItemGroup><ClCompile Include="tests\core_tests.cpp"/><ClCompile Include="src\platform.cpp"/><ClCompile Include="src\floating.cpp"/><ClCompile Include="src\startup.cpp"/></ItemGroup><ItemGroup><ClInclude Include="src\core.hpp"/><ClInclude Include="src\platform.hpp"/><ClInclude Include="src\floating.hpp"/><ClInclude Include="src\floating_layout.hpp"/></ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
 </Project>

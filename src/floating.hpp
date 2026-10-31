@@ -12,7 +12,9 @@ class FloatingWindow {
     std::function<void()> resetGain_, openMain_;
     int dpi_ = 96, maximum_ = 2000;
     double percent_ = 100;
-    bool active_ = false, automatic_ = true, sidebar_ = false, dockRight_ = true, preview_ = false, updating_ = false;
+    bool active_ = false, automatic_ = true, sidebar_ = true, collapsed_ = true, dockRight_ = true, preview_ = false, updating_ = false, dragging_ = false;
+    ULONGLONG leaveSince_ = 0;
+    unsigned topmostPoll_ = 0;
     int s(int value) const { return MulDiv(value, dpi_, 96); }
     void layout();
     void constrain(bool chooseEdge = false);
@@ -26,13 +28,16 @@ public:
     FloatingWindow(const FloatingWindow&) = delete;
     FloatingWindow& operator=(const FloatingWindow&) = delete;
     void create(HWND main, int maximum, bool preview, std::function<void(double)> changeGain,
-                std::function<void()> resetGain, std::function<void()> openMain, bool taskbarPreview = false);
+                std::function<void()> resetGain, std::function<void()> openMain, bool taskbarPreview = false, bool classroom = false);
     void update(double percent, bool active, bool automatic);
     void toggle();
     void show(bool visible);
     void setSidebar(bool sidebar);
+    void setCollapsed(bool collapsed);
+    void checkAutoCollapse(ULONGLONG now, bool interacting);
     bool visible() const { return window_ && IsWindowVisible(window_); }
     bool sidebar() const { return sidebar_; }
+    bool collapsed() const { return sidebar_ && collapsed_; }
     HWND handle() const { return window_; }
     void destroy();
 };

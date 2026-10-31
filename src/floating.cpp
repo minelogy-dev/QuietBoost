@@ -19,7 +19,7 @@ FloatingWindow::~FloatingWindow() {
     if (header_) DeleteObject(header_);
 }
 void FloatingWindow::create(HWND main, int maximum, bool preview, std::function<void(double)> changeGain,
-                            std::function<void()> resetGain, std::function<void()> openMain, bool taskbarPreview) {
+                            std::function<void()> resetGain, std::function<void()> openMain, bool taskbarPreview, bool classroom) {
     if (window_) throw std::runtime_error("Floating window already exists");
     for (HFONT font : {font_, number_, smallNumber_}) if (font) DeleteObject(font);
     if (background_) DeleteObject(background_);
@@ -41,19 +41,24 @@ void FloatingWindow::create(HWND main, int maximum, bool preview, std::function<
                 return consumed == text.size() && value >= -1000000 && value <= 1000000 ? value : fallback;
             } catch (...) { return fallback; }
         };
-        x = integer(L"X", x); y = integer(L"Y", y); sidebar_ = integer(L"Sidebar", 0) == 1;
+        x = integer(L"X", x); y = integer(L"Y", y); sidebar_ = integer(L"Sidebar", 1) == 1;
+        collapsed_ = integer(L"Collapsed", 1) != 0;
         dockRight_ = integer(L"DockRight", 1) != 0; visible = integer(L"Visible", 1) != 0;
     }
+    if (classroom) { sidebar_ = collapsed_ = visible = true; }
+    if (!sidebar_) collapsed_ = false;
     WNDCLASSEXW type{sizeof(type)}; type.lpfnWndProc = procedure; type.hInstance = GetModuleHandleW(nullptr);
     type.lpszClassName = L"QuietBoost.Floating.v1"; type.hCursor = LoadCursorW(nullptr, IDC_ARROW); RegisterClassExW(&type);
     // Deliberately unowned: minimizing/hiding the main window keeps this tool visible.
-    window_ = CreateWindowExW(WS_EX_TOPMOST | (preview_ && taskbarPreview ? WS_EX_APPWINDOW : WS_EX_TOOLWINDOW), type.lpszClassName, L"QuietBoost · 悬浮控制",
+    window_ = CreateWindowExW(WS_EX_TOPMOST | WS_EX_NOACTIVATE | WS_EX_LAYERED | (preview_ && taskbarPreview ? WS_EX_APPWINDOW : WS_EX_TOOLWINDOW), type.lpszClassName, L"QuietBoost · 悬浮控制",
         WS_POPUP | WS_BORDER | WS_CLIPCHILDREN, x, y, s(320), s(196), nullptr, nullptr, type.hInstance, this);
     if (!window_) throw std::runtime_error("Cannot create floating window");
     layout(); constrain(); update(100, preview_, true);
+    SetTimer(window_, 1, 200, nullptr);
     if (visible) ShowWindow(window_, SW_SHOWNOACTIVATE);
 }
 void FloatingWindow::layout() {
+    RECT previous{}; GetWindowRect(window_, &previous); auto work = workArea(previous);
     if (slider_) DestroyWindow(slider_);
     slider_ = CreateWindowExW(0, TRACKBAR_CLASSW, L"输出增益", WS_CHILD | WS_VISIBLE | WS_TABSTOP | TBS_NOTICKS | (sidebar_ ? TBS_VERT | TBS_REVERSED : 0),
         0, 0, 0, 0, window_, reinterpret_cast<HMENU>(FloatSlider), GetModuleHandleW(nullptr), nullptr);
@@ -63,8 +68,9 @@ void FloatingWindow::layout() {
             0, 0, 0, 0, window_, reinterpret_cast<HMENU>(static_cast<INT_PTR>(id)), GetModuleHandleW(nullptr), nullptr);
         SetWindowTextW(handle, text); SendMessageW(handle, WM_SETFONT, reinterpret_cast<WPARAM>(font_), TRUE);
     };
-    button(reset_, FloatReset, L"恢复 100%"); button(mode_, FloatMode, sidebar_ ? L"展开" : L"侧边条");
-    button(open_, FloatOpen, L"主窗口"); button(hide_, FloatHide, L"×");
+    button(reset_, FloatReset, L"恢复 100%"); button(mode_, FloatMode, sidebar_ ? L"悬浮窗" : L"侧边条");
+    button(open_, FloatOpen, L"设置"); button(hide_, FloatHide, sidebar_ ? (dockRight_ ? L"›" : L"‹") : L"×");
+    for (HWND control : {slider_, reset_, mode_, open_, hide_}) ShowWindow(control, collapsed() ? SW_HIDE : SW_SHOWNA);
     auto move = [&](HWND control, int x, int y, int w, int h) { MoveWindow(control, s(x), s(y), s(w), s(h), TRUE); };
     if (sidebar_) {
         move(hide_, 77, 6, 20, 22); move(slider_, 35, 100, 34, 138);
@@ -73,8 +79,11 @@ void FloatingWindow::layout() {
         move(hide_, 286, 6, 24, 22); move(slider_, 12, 108, 296, 32);
         move(reset_, 12, 151, 92, 31); move(mode_, 112, 151, 92, 31); move(open_, 212, 151, 96, 31);
     }
-    SetWindowPos(window_, nullptr, 0, 0, s(sidebar_ ? 106 : 320), s(sidebar_ ? 360 : 196), SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
-    SetWindowTextW(window_, sidebar_ ? L"QuietBoost · 侧边条" : L"QuietBoost · 悬浮控制");
+    int width = collapsed() ? 22 : sidebar_ ? 106 : 320, height = collapsed() ? 112 : sidebar_ ? 360 : 196;
+    auto bounds = floatingBounds({previous.left, previous.top, previous.left + s(width), previous.top + s(height)}, work, sidebar_, dockRight_);
+    SetWindowPos(window_, nullptr, bounds.left, bounds.top, bounds.right - bounds.left, bounds.bottom - bounds.top, SWP_NOZORDER | SWP_NOACTIVATE);
+    SetLayeredWindowAttributes(window_, 0, collapsed() ? 185 : 255, LWA_ALPHA);
+    SetWindowTextW(window_, collapsed() ? L"QuietBoost · 音量条（点击展开，拖动顶部移动）" : sidebar_ ? L"QuietBoost · 侧边条" : L"QuietBoost · 悬浮控制");
     update(percent_, active_, automatic_); InvalidateRect(window_, nullptr, TRUE);
 }
 void FloatingWindow::constrain(bool chooseEdge) {
@@ -89,7 +98,7 @@ void FloatingWindow::save() noexcept {
         RECT bounds{}; GetWindowRect(window_, &bounds);
         std::wostringstream text;
         text << L"; Window layout only. Gain and protection state are never persisted.\r\n[FloatingWindow]\r\nVisible=" << (visible() ? 1 : 0)
-             << L"\r\nSidebar=" << (sidebar_ ? 1 : 0) << L"\r\nDockRight=" << (dockRight_ ? 1 : 0) << L"\r\nX=" << bounds.left << L"\r\nY=" << bounds.top << L"\r\n";
+             << L"\r\nSidebar=" << (sidebar_ ? 1 : 0) << L"\r\nCollapsed=" << (collapsed() ? 1 : 0) << L"\r\nDockRight=" << (dockRight_ ? 1 : 0) << L"\r\nX=" << bounds.left << L"\r\nY=" << bounds.top << L"\r\n";
         atomicWrite(store_.root / L"window.ini", text.str());
     } catch (const std::exception& e) { store_.log(L"Floating window layout: " + wide(e.what())); }
 }
@@ -117,19 +126,37 @@ void FloatingWindow::setSidebar(bool sidebar) {
     if (sidebar_ != sidebar) {
         RECT current{}; GetWindowRect(window_, &current); auto work = workArea(current);
         if (sidebar) dockRight_ = nearestRightEdge(current, work);
-        sidebar_ = sidebar; layout();
+        sidebar_ = sidebar; collapsed_ = sidebar; leaveSince_ = 0; layout();
         if (!sidebar_) SetWindowPos(window_, nullptr, dockRight_ ? work.right - s(332) : work.left + s(12), current.top, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
         constrain();
     }
     show(true);
 }
+void FloatingWindow::setCollapsed(bool collapse) {
+    if (!sidebar_ || !window_) return;
+    if (collapsed_ != collapse) { collapsed_ = collapse; leaveSince_ = 0; layout(); save(); }
+}
+void FloatingWindow::checkAutoCollapse(ULONGLONG now, bool interacting) {
+    if (!sidebar_ || collapsed_ || !visible() || interacting || dragging_) { leaveSince_ = 0; return; }
+    if (!leaveSince_) leaveSince_ = now;
+    else if (now - leaveSince_ >= 1200) setCollapsed(true);
+}
 void FloatingWindow::destroy() {
-    if (window_) { save(); DestroyWindow(window_); window_ = nullptr; }
+    if (window_) { save(); KillTimer(window_, 1); DestroyWindow(window_); window_ = nullptr; slider_ = reset_ = mode_ = open_ = hide_ = nullptr; }
 }
 void FloatingWindow::paint(HDC supplied) {
     PAINTSTRUCT ps{}; HDC dc = supplied ? supplied : BeginPaint(window_, &ps); RECT client{}; GetClientRect(window_, &client);
     FillRect(dc, &client, background_); RECT header{0, 0, client.right, s(36)}; FillRect(dc, &header, header_);
     SetBkMode(dc, TRANSPARENT); SelectObject(dc, font_); SetTextColor(dc, RGB(255, 255, 255));
+    if (collapsed()) {
+        FillRect(dc, &client, header_);
+        RECT grip{0, s(4), client.right, s(24)}; DrawTextW(dc, L"⋮", -1, &grip, DT_CENTER | DT_SINGLELINE);
+        RECT first{0, s(34), client.right, s(54)}, second{0, s(56), client.right, s(76)}, arrow{0, s(82), client.right, s(104)};
+        DrawTextW(dc, L"音", -1, &first, DT_CENTER | DT_SINGLELINE); DrawTextW(dc, L"量", -1, &second, DT_CENTER | DT_SINGLELINE);
+        DrawTextW(dc, dockRight_ ? L"‹" : L"›", -1, &arrow, DT_CENTER | DT_SINGLELINE);
+        if (!supplied) EndPaint(window_, &ps);
+        return;
+    }
     RECT title{s(12), 0, client.right - s(38), s(36)};
     DrawTextW(dc, sidebar_ ? L"QB · 拖动" : L"QuietBoost · 拖动移动", -1, &title, DT_SINGLELINE | DT_VCENTER);
     SetTextColor(dc, RGB(34, 52, 75)); SelectObject(dc, sidebar_ && percent_ >= 10000 ? smallNumber_ : number_);
@@ -149,12 +176,21 @@ LRESULT FloatingWindow::message(UINT message, WPARAM w, LPARAM l) {
     case WM_PRINTCLIENT: paint(reinterpret_cast<HDC>(w)); return 0;
     case WM_ERASEBKGND: return 1;
     case WM_CTLCOLORSTATIC: case WM_CTLCOLORBTN: return reinterpret_cast<LRESULT>(background_);
+    case WM_MOUSEACTIVATE: return MA_NOACTIVATE;
+    case WM_LBUTTONUP: if (collapsed()) setCollapsed(false); return 0;
+    case WM_TIMER: {
+        if (visible() && ++topmostPoll_ % 5 == 0) SetWindowPos(window_, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+        POINT point{}; RECT bounds{}; GetCursorPos(&point); GetWindowRect(window_, &bounds);
+        HWND captured = GetCapture(); checkAutoCollapse(GetTickCount64(), PtInRect(&bounds, point) || captured == window_ || (captured && IsChild(window_, captured)));
+        return 0;
+    }
     case WM_NCHITTEST: {
         POINT point{GET_X_LPARAM(l), GET_Y_LPARAM(l)}; ScreenToClient(window_, &point);
-        if (point.y >= 0 && point.y < s(36) && point.x < s(sidebar_ ? 75 : 282)) return HTCAPTION;
+        if (point.y >= 0 && point.y < s(collapsed() ? 24 : 36) && (collapsed() || point.x < s(sidebar_ ? 75 : 282))) return HTCAPTION;
         return HTCLIENT;
     }
-    case WM_EXITSIZEMOVE: constrain(sidebar_); save(); return 0;
+    case WM_ENTERSIZEMOVE: dragging_ = true; return 0;
+    case WM_EXITSIZEMOVE: dragging_ = false; constrain(sidebar_); save(); return 0;
     case WM_DISPLAYCHANGE: case WM_SETTINGCHANGE: constrain(); return 0;
     case WM_HSCROLL: case WM_VSCROLL:
         if (!updating_ && active_ && reinterpret_cast<HWND>(l) == slider_) {
@@ -169,7 +205,7 @@ LRESULT FloatingWindow::message(UINT message, WPARAM w, LPARAM l) {
         case FloatReset: resetGain_(); break;
         case FloatMode: setSidebar(!sidebar_); break;
         case FloatOpen: openMain_(); break;
-        case FloatHide: show(false); break;
+        case FloatHide: if (sidebar_) setCollapsed(true); else show(false); break;
         }
         return 0;
     case WM_CLOSE: show(false); return 0;

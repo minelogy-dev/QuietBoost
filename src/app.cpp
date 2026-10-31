@@ -8,7 +8,7 @@
 #include <iomanip>
 
 namespace qb {
-enum : int { Input = 100, Output, GainEdit, GainSlider, Automatic, Connect, Refresh, ResetGain, Install, ExitApp, Config, OpenApp, Donate, ToggleFloating, Sidebar };
+enum : int { Input = 100, Output, GainEdit, GainSlider, Automatic, Connect, Refresh, ResetGain, Install, ExitApp, Config, OpenApp, Donate, ToggleFloating, Sidebar, LoginStart };
 constexpr UINT TrayMessage = WM_APP + 1, StartupMessage = WM_APP + 2;
 static void png(HWND window, const fs::path& path) {
     RECT bounds{}; GetClientRect(window, &bounds); int width = bounds.right, height = bounds.bottom;
@@ -42,11 +42,13 @@ static void png(HWND window, const fs::path& path) {
 }
 class App {
     StateStore& store_; Settings settings_; Route route_; FloatingWindow floating_;
-    HWND window_ = nullptr, input_ = nullptr, output_ = nullptr, edit_ = nullptr, slider_ = nullptr, automatic_ = nullptr, status_ = nullptr, silence_ = nullptr, detail_ = nullptr, connect_ = nullptr, refresh_ = nullptr;
+    HWND window_ = nullptr, input_ = nullptr, output_ = nullptr, edit_ = nullptr, slider_ = nullptr, automatic_ = nullptr, status_ = nullptr, silence_ = nullptr, detail_ = nullptr, connect_ = nullptr, refresh_ = nullptr, login_ = nullptr;
     HFONT font_ = nullptr, heading_ = nullptr, number_ = nullptr;
     HBRUSH background_ = CreateSolidBrush(RGB(245, 247, 251)), white_ = CreateSolidBrush(RGB(255, 255, 255));
     std::vector<Device> virtuals_, physical_;
     bool updating_ = false, formalExit_ = false, preview_ = false, hotkey_ = false;
+    bool startupLaunch_ = false, startupRetry_ = false;
+    unsigned startupPoll_ = 0;
     unsigned lastReset_ = 0, poll_ = 0;
     int dpi_ = 96;
     fs::path previewPath_;
@@ -105,7 +107,7 @@ class App {
         SetCursor(LoadCursorW(nullptr, IDC_WAIT)); EnableWindow(connect_, FALSE);
         try {
             settings_.virtualId = virtuals_[inputIndex].id; settings_.outputId = physical_[outputIndex].id; store_.saveSettings(settings_);
-            route_.start(settings_.virtualId, settings_.outputId); gainUi(100); setStatus(L"正在转发 · " + physical_[outputIndex].name);
+            route_.start(settings_.virtualId, settings_.outputId); startupRetry_ = false; gainUi(100); setStatus(L"正在转发 · " + physical_[outputIndex].name);
         } catch (const std::exception& e) { failure(e); }
         SetCursor(LoadCursorW(nullptr, IDC_ARROW)); updateActive();
     }
@@ -139,6 +141,9 @@ class App {
     }
     void tick() {
         if (preview_) return;
+        if (startupRetry_ && !route_.engine && ++startupPoll_ % 50 == 0) {
+            loadDevices(); if (!virtuals_.empty() && !physical_.empty()) start();
+        }
         if (lastReset_ != route_.gain.resets()) { lastReset_ = route_.gain.resets(); gainUi(100); setStatus(L"静音超时，已恢复 100% · 需要时可手动重新增强"); }
         std::wstring text;
         if (!route_.gain.automatic()) text = L"本次运行已关闭自动恢复 · 下次启动重新开启";
@@ -187,14 +192,20 @@ class App {
         automatic_ = control(L"BUTTON", L"连续静音 " + std::to_wstring(settings_.silenceTimeoutMs / 1000) + L" 秒后恢复至 100%", BS_AUTOCHECKBOX | WS_TABSTOP, 49, 507, 704, 27, Automatic); SendMessageW(automatic_, BM_SETCHECK, BST_CHECKED, 0);
         silence_ = label(L"已启用保护 · 当前为原始增益", 69, 544, 690, 24);
         status_ = label(L"正在检查设备…", 32, 599, 755, 41);
-        label(L"关闭窗口收起到托盘 · Ctrl + Alt + 0 恢复增益", 32, 642, 740, 23);
+        login_ = control(L"BUTTON", L"开机自启 · 登录后仅显示侧边音量条", BS_AUTOCHECKBOX | WS_TABSTOP, 32, 641, 440, 27, LoginStart);
+        label(L"Ctrl + Alt + 0 恢复增益", 493, 644, 297, 23);
+        if (preview_) EnableWindow(login_, FALSE);
+        else {
+            try { SendMessageW(login_, BM_SETCHECK, LoginStartup(store_).enabled() ? BST_CHECKED : BST_UNCHECKED, 0); }
+            catch (const std::exception& e) { store_.log(wide(e.what())); EnableWindow(login_, FALSE); }
+        }
         connect_ = control(L"BUTTON", L"启动并切换设备", BS_PUSHBUTTON | WS_TABSTOP, 30, 683, 180, 34, Connect);
         refresh_ = control(L"BUTTON", L"刷新设备", BS_PUSHBUTTON | WS_TABSTOP, 220, 683, 100, 34, Refresh);
         control(L"BUTTON", L"恢复 100%", BS_PUSHBUTTON | WS_TABSTOP, 330, 683, 110, 34, ResetGain);
         control(L"BUTTON", L"安装虚拟设备", BS_PUSHBUTTON | WS_TABSTOP, 450, 683, 128, 34, Install);
         control(L"BUTTON", L"配置", BS_PUSHBUTTON | WS_TABSTOP, 588, 683, 70, 34, Config);
         control(L"BUTTON", L"正式退出", BS_PUSHBUTTON | WS_TABSTOP, 668, 683, 122, 34, ExitApp);
-        floating_.create(window_, settings_.maxGainPercent, preview_, [this](double percent) { setGain(percent); }, [this] { reset(); }, [this] { ShowWindow(window_, SW_RESTORE); SetForegroundWindow(window_); }, previewMode_ == L"--ui-preview");
+        floating_.create(window_, settings_.maxGainPercent, preview_, [this](double percent) { setGain(percent); }, [this] { reset(); }, [this] { ShowWindow(window_, SW_RESTORE); SetForegroundWindow(window_); }, previewMode_ == L"--ui-preview", startupLaunch_);
         if (preview_) floating_.show(false);
         tray(true);
         if (!preview_) hotkey_ = RegisterHotKey(window_, 1, MOD_CONTROL | MOD_ALT | MOD_NOREPEAT, '0') != FALSE;
@@ -224,7 +235,10 @@ class App {
                 virtuals_.push_back({L"preview-v", L"CABLE Input (VB-Audio Virtual Cable)", true}); physical_.push_back({L"preview-p", L"扬声器 (Realtek Audio)", false});
                 choose(input_, virtuals_, L""); choose(output_, physical_, L""); setGain(650); updateActive(); SetWindowTextW(silence_, L"已启用保护 · 当前静音 0.0 秒"); setStatus(L"界面预览 · 不接入音频，不切换设备");
                 if (previewMode_ == L"--ui-preview") floating_.show(true); else SetTimer(window_, 2, 350, nullptr);
-            } else { loadDevices(); if (settings_.autoStart && !virtuals_.empty() && !physical_.empty()) start(); }
+            } else {
+                startupRetry_ = startupLaunch_ && settings_.autoStart;
+                loadDevices(); if (settings_.autoStart && !virtuals_.empty() && !physical_.empty()) start();
+            }
             return 0;
         case WM_PAINT: paint(); return 0;
         case WM_PRINTCLIENT: paint(reinterpret_cast<HDC>(w)); return 0;
@@ -244,13 +258,24 @@ class App {
             }
             if (notification != BN_CLICKED && id != OpenApp && id != ExitApp && id != ResetGain && id != ToggleFloating && id != Sidebar) return 0;
             switch (id) {
-                case Connect: if (route_.engine) stop(); else start(); break;
+                case Connect: startupRetry_ = false; if (route_.engine) stop(); else start(); break;
                 case Refresh: loadDevices(); break;
                 case ResetGain: reset(); break;
                 case Automatic: changeAutomatic(); break;
                 case OpenApp: ShowWindow(window_, SW_RESTORE); SetForegroundWindow(window_); break;
                 case ToggleFloating: floating_.toggle(); break;
                 case Sidebar: floating_.setSidebar(!floating_.sidebar()); break;
+                case LoginStart:
+                    if (!preview_) {
+                        LoginStartup registration(store_);
+                        try {
+                            bool enabled = SendMessageW(login_, BM_GETCHECK, 0, 0) == BST_CHECKED;
+                            registration.setEnabled(enabled);
+                            if (enabled) { settings_.autoStart = true; store_.saveSettings(settings_); }
+                            setStatus(enabled ? L"已开启开机自启 · 登录后只显示侧边音量条，无需保留下载的 EXE。" : L"已关闭开机自启。");
+                        } catch (const std::exception& e) { SendMessageW(login_, BM_SETCHECK, registration.enabled() ? BST_CHECKED : BST_UNCHECKED, 0); failure(e); }
+                    }
+                    break;
                 case ExitApp: formalExit_ = true; SendMessageW(window_, WM_CLOSE, 0, 0); break;
                 case Install:
                     if (route_.engine) { setStatus(L"请先停止转发，再安装或维护虚拟设备。"); break; }
@@ -264,8 +289,9 @@ class App {
             if (w == 1) tick();
             else if (w == 2) {
                 KillTimer(window_, 2);
-                if (previewMode_ == L"--render-floating-preview" || previewMode_ == L"--render-sidebar-preview") {
-                    floating_.setSidebar(previewMode_ == L"--render-sidebar-preview");
+                if (previewMode_ == L"--render-floating-preview" || previewMode_ == L"--render-sidebar-preview" || previewMode_ == L"--render-rail-preview") {
+                    floating_.setSidebar(previewMode_ != L"--render-floating-preview");
+                    floating_.setCollapsed(previewMode_ == L"--render-rail-preview");
                     UpdateWindow(floating_.handle()); png(floating_.handle(), previewPath_);
                 } else png(window_, previewPath_);
                 formalExit_ = true; DestroyWindow(window_);
@@ -287,7 +313,7 @@ class App {
         try { return app->message(message, w, l); } catch (const std::exception& e) { app->failure(e); return 0; }
     }
 public:
-    App(StateStore& store, Settings settings, fs::path preview, std::wstring previewMode = L"") : store_(store), settings_(std::move(settings)), route_(settings_, store_), floating_(store), preview_(!preview.empty()), previewPath_(std::move(preview)), previewMode_(std::move(previewMode)) { dpi_ = static_cast<int>(GetDpiForSystem()); }
+    App(StateStore& store, Settings settings, fs::path preview, std::wstring previewMode = L"", bool startup = false) : store_(store), settings_(std::move(settings)), route_(settings_, store_), floating_(store), preview_(!preview.empty()), startupLaunch_(startup), previewPath_(std::move(preview)), previewMode_(std::move(previewMode)) { dpi_ = static_cast<int>(GetDpiForSystem()); }
     ~App() { if (font_) DeleteObject(font_); if (heading_) DeleteObject(heading_); if (number_) DeleteObject(number_); DeleteObject(background_); DeleteObject(white_); }
     int run() {
         WNDCLASSEXW type{sizeof(type)}; type.lpfnWndProc = procedure; type.hInstance = GetModuleHandleW(nullptr); type.lpszClassName = L"QuietBoost.Native.v2"; type.hCursor = LoadCursorW(nullptr, IDC_ARROW); type.hIcon = LoadIconW(nullptr, IDI_APPLICATION); RegisterClassExW(&type);
@@ -295,7 +321,7 @@ public:
         RECT client{0, 0, s(820), s(737)}; AdjustWindowRect(&client, style, FALSE);
         int width = client.right - client.left, height = client.bottom - client.top;
         HWND window = CreateWindowExW(0, type.lpszClassName, L"QuietBoost · 原生音频增益", style, std::max(0, (GetSystemMetrics(SM_CXSCREEN) - width) / 2), std::max(0, (GetSystemMetrics(SM_CYSCREEN) - height) / 2), width, height, nullptr, nullptr, type.hInstance, this);
-        if (!window) throw std::runtime_error("Cannot create main window"); ShowWindow(window, SW_SHOW); UpdateWindow(window);
+        if (!window) throw std::runtime_error("Cannot create main window"); ShowWindow(window, startupLaunch_ ? SW_HIDE : SW_SHOW); UpdateWindow(window);
         MSG message{}; while (GetMessageW(&message, nullptr, 0, 0) > 0) {
             if (floating_.handle() && (message.hwnd == floating_.handle() || IsChild(floating_.handle(), message.hwnd)) && IsDialogMessageW(floating_.handle(), &message)) continue;
             if (!IsDialogMessageW(window, &message)) { TranslateMessage(&message); DispatchMessageW(&message); }
@@ -330,14 +356,21 @@ int application(const std::vector<std::wstring>& arguments, const fs::path& stat
         if (!error.empty() || !frames || original != endpoints.current(0)) throw std::runtime_error("Native WASAPI probe failed");
         atomicWrite(arguments[1], L"Native WASAPI probe passed.\r\nRendered frames=" + std::to_wstring(frames) + L"\r\nCaptured frames=" + std::to_wstring(received) + L"\r\nOnly digital silence was rendered; default selection and volume were not modified.\r\n"); return 0;
     }
-    bool preview = arguments.size() == 2 && (arguments[0] == L"--render-preview" || arguments[0] == L"--render-floating-preview" || arguments[0] == L"--render-sidebar-preview" || arguments[0] == L"--ui-preview");
+    bool preview = arguments.size() == 2 && (arguments[0] == L"--render-preview" || arguments[0] == L"--render-floating-preview" || arguments[0] == L"--render-sidebar-preview" || arguments[0] == L"--render-rail-preview" || arguments[0] == L"--ui-preview");
+    bool startup = arguments.size() == 1 && arguments[0] == L"--startup";
     Handle instance(CreateMutexW(nullptr, FALSE, L"Local\\QuietBoostNative.SingleInstance.v1"));
     DWORD result = WaitForSingleObject(instance.get(), 0);
-    if (!preview && result != WAIT_OBJECT_0 && result != WAIT_ABANDONED) { MessageBoxW(nullptr, L"QuietBoost 已在运行，请从托盘打开。", L"QuietBoost", MB_OK); return 0; }
+    if (!preview && result != WAIT_OBJECT_0 && result != WAIT_ABANDONED) {
+        if (!startup) { HWND existing = FindWindowW(L"QuietBoost.Native.v2", nullptr); if (existing) { ShowWindow(existing, SW_RESTORE); SetForegroundWindow(existing); } }
+        return 0;
+    }
     struct Unlock { HANDLE value; bool held; ~Unlock() { if (held) ReleaseMutex(value); } } unlock{instance.get(), result == WAIT_OBJECT_0 || result == WAIT_ABANDONED};
-    if (!preview) { auto recovered = recover(store); if (!recovered.success) MessageBoxW(nullptr, recovered.message.c_str(), L"上次运行的设备恢复未完成", MB_OK | MB_ICONWARNING); }
+    bool recoveryReady = true;
+    if (!preview) { auto recovered = recover(store); recoveryReady = recovered.success; if (!recovered.success) { store.log(recovered.message); if (!startup) MessageBoxW(nullptr, recovered.message.c_str(), L"上次运行的设备恢复未完成", MB_OK | MB_ICONWARNING); } }
     INITCOMMONCONTROLSEX controls{sizeof(controls), ICC_STANDARD_CLASSES | ICC_BAR_CLASSES}; InitCommonControlsEx(&controls);
-    App app(store, preview ? Settings{} : store.loadSettings(), preview ? fs::path(arguments[1]) : fs::path{}, preview ? arguments[0] : L""); return app.run();
+    auto settings = preview ? Settings{} : store.loadSettings();
+    if (!recoveryReady) settings.autoStart = false;
+    App app(store, settings, preview ? fs::path(arguments[1]) : fs::path{}, preview ? arguments[0] : L"", startup); return app.run();
 }
 }
 int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {

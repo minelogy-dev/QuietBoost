@@ -2,6 +2,7 @@
 #include "floating_layout.hpp"
 #include "floating.hpp"
 #include <commctrl.h>
+#include <shobjidl.h>
 #include <shellapi.h>
 #include <fstream>
 #include <numeric>
@@ -104,7 +105,7 @@ void floatingInteraction() {
     INITCOMMONCONTROLSEX controls{sizeof(controls), ICC_BAR_CLASSES}; InitCommonControlsEx(&controls);
     auto directory = qb::fs::path(qb::executablePath()).parent_path() / L"test-state" / (L"floating-" + std::to_wstring(GetCurrentProcessId()));
     qb::StateStore store(directory); auto file = directory / L"window.ini";
-    qb::atomicWrite(file, L"[FloatingWindow]\r\nVisible=0\r\nX=-999999\r\nY=-999999\r\nCurrentGain=8000\r\nAutoRestore=0\r\n");
+    qb::atomicWrite(file, L"[FloatingWindow]\r\nVisible=0\r\nSidebar=0\r\nCollapsed=0\r\nX=-999999\r\nY=-999999\r\nCurrentGain=8000\r\nAutoRestore=0\r\n");
     struct Parent { HWND handle = CreateWindowExW(0, L"STATIC", L"QuietBoost UI test", WS_POPUP, 0, 0, 320, 196, nullptr, nullptr, GetModuleHandleW(nullptr), nullptr); ~Parent() { DestroyWindow(handle); } } parent;
     double requested = 0; unsigned resets = 0;
     qb::FloatingWindow floating(store);
@@ -115,7 +116,11 @@ void floatingInteraction() {
     require(IsWindowEnabled(slider) && requested == 0, L"主窗口同步增益不会触发悬浮窗反向调节");
     SendMessageW(slider, WM_KEYDOWN, VK_RIGHT, 0);
     require(requested > 650, L"悬浮窗向右键调高增益");
-    floating.setSidebar(true); slider = FindWindowExW(floating.handle(), nullptr, TRACKBAR_CLASSW, nullptr);
+    floating.setSidebar(true);
+    RECT rail{}; GetWindowRect(floating.handle(), &rail);
+    require(floating.collapsed() && rail.right - rail.left == MulDiv(22, static_cast<int>(GetDpiForSystem()), 96), L"侧边条默认收成 22 DIP 窄入口");
+    require(SendMessageW(floating.handle(), WM_MOUSEACTIVATE, 0, 0) == MA_NOACTIVATE && (GetWindowLongW(floating.handle(), GWL_EXSTYLE) & WS_EX_NOACTIVATE), L"课堂音量条不请求激活课件外窗口");
+    floating.setCollapsed(false); slider = FindWindowExW(floating.handle(), nullptr, TRACKBAR_CLASSW, nullptr);
     requested = 0; SendMessageW(slider, WM_KEYDOWN, VK_UP, 0);
     require(requested > 650, L"侧边条向上键调高增益");
     floating.update(100, true, true);
@@ -123,18 +128,51 @@ void floatingInteraction() {
     HWND reset = FindWindowExW(floating.handle(), nullptr, L"BUTTON", L"恢复 100%"); SendMessageW(reset, BM_CLICK, 0, 0);
     require(resets == 1, L"悬浮窗恢复按钮调用共用复位操作");
     require(floating.visible() && !IsWindowVisible(parent.handle), L"隐藏主窗口不会隐藏独立悬浮窗");
+    floating.checkAutoCollapse(1000, true); floating.checkAutoCollapse(2000, false); floating.checkAutoCollapse(3199, false);
+    require(!floating.collapsed(), L"移出不到 1.2 秒不收起");
+    floating.checkAutoCollapse(3200, false); require(floating.collapsed(), L"移出 1.2 秒后自动收起");
+    floating.setCollapsed(false); floating.checkAutoCollapse(4000, false); floating.checkAutoCollapse(6000, true);
+    require(!floating.collapsed(), L"拖动滑块或指针回到面板时不自动收起");
     floating.show(false); floating.destroy();
     floating.create(parent.handle, 8000, false, [](double) {}, [] {}, [] {});
     require(floating.sidebar() && !floating.visible(), L"重新创建后保留侧边条形态和隐藏状态");
     require(qb::readIni(file, L"FloatingWindow", L"CurrentGain", L"absent") == L"absent" && qb::readIni(file, L"FloatingWindow", L"AutoRestore", L"absent") == L"absent", L"窗口布局文件不保留增益或关闭保护状态");
+    floating.destroy();
+    floating.create(parent.handle, 8000, false, [](double) {}, [] {}, [] {}, false, true);
+    require(floating.visible() && floating.sidebar() && floating.collapsed(), L"登录自启覆盖旧隐藏偏好并只显示窄条");
     floating.destroy(); qb::fs::remove(file); qb::fs::remove(directory);
+}
+void loginStartup() {
+    auto directory = qb::fs::path(qb::executablePath()).parent_path() / L"test-state" / (L"startup-" + std::to_wstring(GetCurrentProcessId()));
+    qb::StateStore store(directory / L"data with 空格" / L"");
+    qb::LoginStartup startup(store, directory / L"fake-startup");
+    auto source = directory / L"download.exe"; qb::atomicWrite(source, L"Test bytes only; never executed.");
+    require(!startup.enabled() && !qb::fs::exists(startup.linkPath()), L"没有勾选时不创建登录自启项");
+    startup.setEnabled(true, source);
+    require(startup.enabled() && qb::fs::exists(startup.executable()), L"自启创建指向稳定本地副本的快捷方式");
+    qb::ComPtr<IShellLinkW> link; qb::check(CoCreateInstance(CLSID_ShellLink, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&link)), "Test startup shortcut");
+    qb::ComPtr<IPersistFile> persisted; qb::check(link.As(&persisted), "Test shortcut persist"); qb::check(persisted->Load(startup.linkPath().c_str(), STGM_READ), "Test shortcut load");
+    wchar_t arguments[32768]{}; qb::check(link->GetArguments(arguments, 32768), "Test shortcut arguments");
+    int count = 0; auto parsed = CommandLineToArgvW((L"QuietBoost.exe " + std::wstring(arguments)).c_str(), &count);
+    bool validArguments = parsed && count == 4 && std::wstring(parsed[1]) == L"--startup" && std::wstring(parsed[2]) == L"--state-dir" && qb::fs::path(parsed[3]) == store.root;
+    LocalFree(parsed); require(validArguments, L"自启参数正确保留中文空格和尾部反斜杠路径");
+    require(qb::fs::file_size(source) == qb::fs::file_size(startup.executable()), L"自启程序副本保留原始文件字节长度");
+    qb::fs::remove(source); require(startup.enabled(), L"删除下载副本不影响自启快捷方式目标");
+    startup.setEnabled(true, startup.executable()); require(startup.enabled(), L"从受管副本开启自启不会覆盖自身");
+    startup.setEnabled(false); require(!startup.enabled() && !qb::fs::exists(startup.linkPath()), L"取消自启移除本工具快捷方式");
+    startup.setEnabled(false); require(!startup.enabled(), L"重复关闭自启无需残留注册项");
+    qb::atomicWrite(startup.linkPath(), L"Unrelated file");
+    throws([&] { startup.setEnabled(true, startup.executable()); }, L"自启不覆盖同名无关文件");
+    throws([&] { startup.setEnabled(false); }, L"关闭自启不删除同名无关文件");
+    qb::fs::remove(startup.linkPath()); qb::fs::remove(startup.executable()); qb::fs::remove(startup.executable().parent_path());
+    qb::fs::remove(startup.linkPath().parent_path()); qb::fs::remove(store.root); qb::fs::remove(directory);
 }
 }
 int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
     bool headless = std::wstring(GetCommandLineW()).find(L"--headless") != std::wstring::npos;
     auto reportPath = qb::fs::path(qb::executablePath()).parent_path() / L"test-results.txt";
     try {
-        qb::ComApartment apartment; silence(); dsp(); ring(); recovery(); config(); floatingLayout(); floatingInteraction();
+        qb::ComApartment apartment; silence(); dsp(); ring(); recovery(); config(); floatingLayout(); floatingInteraction(); loginStartup();
         report += L"\r\n" + std::to_wstring(passed) + L" checks passed.\r\n"; qb::atomicWrite(reportPath, report);
         if (!headless) MessageBoxW(nullptr, (std::to_wstring(passed) + L" 项检查通过。\n结果已保存到：\n" + reportPath.wstring()).c_str(), L"QuietBoost 测试", MB_OK | MB_ICONINFORMATION);
         return 0;

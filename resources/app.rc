@@ -3,8 +3,8 @@
 #include <windows.h>
 
 1 VERSIONINFO
- FILEVERSION 2,1,0,0
- PRODUCTVERSION 2,1,0,0
+ FILEVERSION 2,2,0,0
+ PRODUCTVERSION 2,2,0,0
  FILETYPE VFT_APP
 BEGIN
  BLOCK "StringFileInfo"
@@ -14,9 +14,9 @@ BEGIN
    VALUE "FileDescription", "QuietBoost Native Audio Gain\0"
    VALUE "CompanyName", "minelogy-dev\0"
    VALUE "Comments", "Maintained by minelogy-dev. AI-assisted development with OpenAI Codex.\0"
-   VALUE "FileVersion", "2.1.0\0"
+   VALUE "FileVersion", "2.2.0\0"
    VALUE "ProductName", "QuietBoost\0"
-   VALUE "ProductVersion", "2.1.0\0"
+   VALUE "ProductVersion", "2.2.0\0"
   END
  END
  BLOCK "VarFileInfo"

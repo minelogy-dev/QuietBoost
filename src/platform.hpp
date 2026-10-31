@@ -50,6 +50,17 @@ public:
     void saveSnapshot(const Snapshot& value);
     void log(const std::wstring& message) const;
 };
+class LoginStartup {
+    fs::path root_, directory_;
+    std::wstring arguments() const;
+    bool ownsLink() const;
+public:
+    explicit LoginStartup(const StateStore& store, fs::path startupDirectory = {});
+    fs::path linkPath() const { return directory_ / L"QuietBoostNative.lnk"; }
+    fs::path executable() const { return root_ / L"app" / L"QuietBoost.exe"; }
+    bool enabled() const;
+    void setEnabled(bool enabled, const fs::path& source = executablePath());
+};
 class Endpoints : public EndpointService {
 public:
     std::vector<Device> list() override;
