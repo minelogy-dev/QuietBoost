@@ -1,5 +1,6 @@
 #include "floating.hpp"
 #include "floating_layout.hpp"
+#include "number_text.hpp"
 #include <commctrl.h>
 #include <windowsx.h>
 
@@ -14,21 +15,20 @@ RECT workArea(RECT bounds) {
 }
 FloatingWindow::~FloatingWindow() {
     destroy();
-    for (HFONT font : {font_, number_, smallNumber_}) if (font) DeleteObject(font);
+    for (HFONT font : {font_, number_}) if (font) DeleteObject(font);
     if (background_) DeleteObject(background_);
     if (header_) DeleteObject(header_);
 }
 void FloatingWindow::create(HWND main, int maximum, bool preview, std::function<void(double)> changeGain,
                             std::function<void()> resetGain, std::function<void()> openMain, bool taskbarPreview, bool classroom) {
     if (window_) throw std::runtime_error("Floating window already exists");
-    for (HFONT font : {font_, number_, smallNumber_}) if (font) DeleteObject(font);
+    for (HFONT font : {font_, number_}) if (font) DeleteObject(font);
     if (background_) DeleteObject(background_);
     if (header_) DeleteObject(header_);
     maximum_ = maximum; preview_ = preview; changeGain_ = std::move(changeGain); resetGain_ = std::move(resetGain); openMain_ = std::move(openMain);
     dpi_ = static_cast<int>(GetDpiForSystem());
     font_ = CreateFontW(-s(13), 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE, DEFAULT_CHARSET, 0, 0, CLEARTYPE_QUALITY, 0, L"Microsoft YaHei UI");
     number_ = CreateFontW(-s(28), 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE, DEFAULT_CHARSET, 0, 0, CLEARTYPE_QUALITY, 0, L"Segoe UI");
-    smallNumber_ = CreateFontW(-s(16), 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE, DEFAULT_CHARSET, 0, 0, CLEARTYPE_QUALITY, 0, L"Segoe UI");
     background_ = CreateSolidBrush(RGB(245, 247, 251)); header_ = CreateSolidBrush(RGB(34, 52, 75));
     RECT parent{}; GetWindowRect(main, &parent); auto work = workArea(parent);
     int x = work.right - s(340), y = work.top + s(100); bool visible = true;
@@ -159,10 +159,10 @@ void FloatingWindow::paint(HDC supplied) {
     }
     RECT title{s(12), 0, client.right - s(38), s(36)};
     DrawTextW(dc, sidebar_ ? L"QB · 拖动" : L"QuietBoost · 拖动移动", -1, &title, DT_SINGLELINE | DT_VCENTER);
-    SetTextColor(dc, RGB(34, 52, 75)); SelectObject(dc, sidebar_ && percent_ >= 10000 ? smallNumber_ : number_);
+    SetTextColor(dc, RGB(34, 52, 75));
     RECT number{s(12), s(44), client.right - s(12), s(80)};
     auto value = std::to_wstring(static_cast<int>(std::round(percent_))) + L"%";
-    DrawTextW(dc, value.c_str(), -1, &number, DT_SINGLELINE | DT_VCENTER | (sidebar_ ? DT_CENTER : DT_LEFT));
+    drawFittedNumber(dc, number_, value, number, sidebar_ ? DT_CENTER : DT_LEFT);
     SelectObject(dc, font_);
     SetTextColor(dc, !active_ ? RGB(94, 108, 124) : automatic_ ? RGB(18, 122, 88) : RGB(161, 90, 18));
     RECT status{s(8), s(82), client.right - s(8), s(102)};

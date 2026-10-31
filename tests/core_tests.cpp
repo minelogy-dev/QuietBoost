@@ -1,6 +1,7 @@
 #include "platform.hpp"
 #include "floating_layout.hpp"
 #include "floating.hpp"
+#include "number_text.hpp"
 #include <commctrl.h>
 #include <shobjidl.h>
 #include <shellapi.h>
@@ -167,12 +168,28 @@ void loginStartup() {
     qb::fs::remove(startup.linkPath()); qb::fs::remove(startup.executable()); qb::fs::remove(startup.executable().parent_path());
     qb::fs::remove(startup.linkPath().parent_path()); qb::fs::remove(store.root); qb::fs::remove(directory);
 }
+void numberRendering() {
+    HDC dc = CreateCompatibleDC(nullptr); bool restored = true;
+    for (int dpi : {96, 144, 192}) {
+        HFONT font = CreateFontW(-MulDiv(28, dpi, 96), 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE, DEFAULT_CHARSET, 0, 0, CLEARTYPE_QUALITY, 0, L"Segoe UI");
+        HGDIOBJ initial = GetCurrentObject(dc, OBJ_FONT); bool fits = true;
+        RECT bounds{0, 0, MulDiv(80, dpi, 96), MulDiv(36, dpi, 96)};
+        for (const wchar_t* value : {L"100%", L"650%", L"1000%", L"2000%", L"9999%", L"10000%", L"1000000%"}) {
+            auto extent = qb::drawFittedNumber(dc, font, value, bounds, DT_CENTER);
+            fits &= extent.cx > 0 && extent.cy > 0 && extent.cx <= bounds.right && extent.cy <= bounds.bottom;
+            restored &= GetCurrentObject(dc, OBJ_FONT) == initial;
+        }
+        DeleteObject(font);
+        require(fits, (L"完整百分比在侧边条范围内显示，DPI=" + std::to_wstring(dpi)).c_str());
+    }
+    DeleteDC(dc); require(restored, L"数字自适应绘制后恢复原 GDI 字体对象");
+}
 }
 int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
     bool headless = std::wstring(GetCommandLineW()).find(L"--headless") != std::wstring::npos;
     auto reportPath = qb::fs::path(qb::executablePath()).parent_path() / L"test-results.txt";
     try {
-        qb::ComApartment apartment; silence(); dsp(); ring(); recovery(); config(); floatingLayout(); floatingInteraction(); loginStartup();
+        qb::ComApartment apartment; silence(); dsp(); ring(); recovery(); config(); floatingLayout(); floatingInteraction(); loginStartup(); numberRendering();
         report += L"\r\n" + std::to_wstring(passed) + L" checks passed.\r\n"; qb::atomicWrite(reportPath, report);
         if (!headless) MessageBoxW(nullptr, (std::to_wstring(passed) + L" 项检查通过。\n结果已保存到：\n" + reportPath.wstring()).c_str(), L"QuietBoost 测试", MB_OK | MB_ICONINFORMATION);
         return 0;

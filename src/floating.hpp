@@ -6,7 +6,7 @@ namespace qb {
 class FloatingWindow {
     StateStore& store_;
     HWND window_ = nullptr, slider_ = nullptr, reset_ = nullptr, mode_ = nullptr, open_ = nullptr, hide_ = nullptr;
-    HFONT font_ = nullptr, number_ = nullptr, smallNumber_ = nullptr;
+    HFONT font_ = nullptr, number_ = nullptr;
     HBRUSH background_ = nullptr, header_ = nullptr;
     std::function<void(double)> changeGain_;
     std::function<void()> resetGain_, openMain_;

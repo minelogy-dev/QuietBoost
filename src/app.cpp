@@ -53,6 +53,7 @@ class App {
     int dpi_ = 96;
     fs::path previewPath_;
     std::wstring previewMode_;
+    double previewPercent_ = 650;
     NOTIFYICONDATAW tray_{};
     UINT taskbarCreated_ = RegisterWindowMessageW(L"TaskbarCreated");
     int s(int value) const { return MulDiv(value, dpi_, 96); }
@@ -233,7 +234,7 @@ class App {
         case StartupMessage:
             if (preview_) {
                 virtuals_.push_back({L"preview-v", L"CABLE Input (VB-Audio Virtual Cable)", true}); physical_.push_back({L"preview-p", L"扬声器 (Realtek Audio)", false});
-                choose(input_, virtuals_, L""); choose(output_, physical_, L""); setGain(650); updateActive(); SetWindowTextW(silence_, L"已启用保护 · 当前静音 0.0 秒"); setStatus(L"界面预览 · 不接入音频，不切换设备");
+                choose(input_, virtuals_, L""); choose(output_, physical_, L""); setGain(previewPercent_); updateActive(); SetWindowTextW(silence_, L"已启用保护 · 当前静音 0.0 秒"); setStatus(L"界面预览 · 不接入音频，不切换设备");
                 if (previewMode_ == L"--ui-preview") floating_.show(true); else SetTimer(window_, 2, 350, nullptr);
             } else {
                 startupRetry_ = startupLaunch_ && settings_.autoStart;
@@ -313,7 +314,7 @@ class App {
         try { return app->message(message, w, l); } catch (const std::exception& e) { app->failure(e); return 0; }
     }
 public:
-    App(StateStore& store, Settings settings, fs::path preview, std::wstring previewMode = L"", bool startup = false) : store_(store), settings_(std::move(settings)), route_(settings_, store_), floating_(store), preview_(!preview.empty()), startupLaunch_(startup), previewPath_(std::move(preview)), previewMode_(std::move(previewMode)) { dpi_ = static_cast<int>(GetDpiForSystem()); }
+    App(StateStore& store, Settings settings, fs::path preview, std::wstring previewMode = L"", bool startup = false, double previewPercent = 650) : store_(store), settings_(std::move(settings)), route_(settings_, store_), floating_(store), preview_(!preview.empty()), startupLaunch_(startup), previewPath_(std::move(preview)), previewMode_(std::move(previewMode)), previewPercent_(previewPercent) { dpi_ = static_cast<int>(GetDpiForSystem()); }
     ~App() { if (font_) DeleteObject(font_); if (heading_) DeleteObject(heading_); if (number_) DeleteObject(number_); DeleteObject(background_); DeleteObject(white_); }
     int run() {
         WNDCLASSEXW type{sizeof(type)}; type.lpfnWndProc = procedure; type.hInstance = GetModuleHandleW(nullptr); type.lpszClassName = L"QuietBoost.Native.v2"; type.hCursor = LoadCursorW(nullptr, IDC_ARROW); type.hIcon = LoadIconW(nullptr, IDI_APPLICATION); RegisterClassExW(&type);
@@ -356,7 +357,12 @@ int application(const std::vector<std::wstring>& arguments, const fs::path& stat
         if (!error.empty() || !frames || original != endpoints.current(0)) throw std::runtime_error("Native WASAPI probe failed");
         atomicWrite(arguments[1], L"Native WASAPI probe passed.\r\nRendered frames=" + std::to_wstring(frames) + L"\r\nCaptured frames=" + std::to_wstring(received) + L"\r\nOnly digital silence was rendered; default selection and volume were not modified.\r\n"); return 0;
     }
-    bool preview = arguments.size() == 2 && (arguments[0] == L"--render-preview" || arguments[0] == L"--render-floating-preview" || arguments[0] == L"--render-sidebar-preview" || arguments[0] == L"--render-rail-preview" || arguments[0] == L"--ui-preview");
+    bool preview = (arguments.size() == 2 || arguments.size() == 3) && (arguments[0] == L"--render-preview" || arguments[0] == L"--render-floating-preview" || arguments[0] == L"--render-sidebar-preview" || arguments[0] == L"--render-rail-preview" || arguments[0] == L"--ui-preview");
+    double previewPercent = 650;
+    if (preview && arguments.size() == 3) {
+        size_t consumed = 0; previewPercent = std::stod(arguments[2], &consumed);
+        if (consumed != arguments[2].size() || !std::isfinite(previewPercent) || previewPercent < 100 || previewPercent > 1000000) throw std::runtime_error("Preview gain must be 100..1000000");
+    }
     bool startup = arguments.size() == 1 && arguments[0] == L"--startup";
     Handle instance(CreateMutexW(nullptr, FALSE, L"Local\\QuietBoostNative.SingleInstance.v1"));
     DWORD result = WaitForSingleObject(instance.get(), 0);
@@ -369,8 +375,9 @@ int application(const std::vector<std::wstring>& arguments, const fs::path& stat
     if (!preview) { auto recovered = recover(store); recoveryReady = recovered.success; if (!recovered.success) { store.log(recovered.message); if (!startup) MessageBoxW(nullptr, recovered.message.c_str(), L"上次运行的设备恢复未完成", MB_OK | MB_ICONWARNING); } }
     INITCOMMONCONTROLSEX controls{sizeof(controls), ICC_STANDARD_CLASSES | ICC_BAR_CLASSES}; InitCommonControlsEx(&controls);
     auto settings = preview ? Settings{} : store.loadSettings();
+    if (preview) settings.maxGainPercent = std::max(settings.maxGainPercent, static_cast<int>(std::ceil(previewPercent)));
     if (!recoveryReady) settings.autoStart = false;
-    App app(store, settings, preview ? fs::path(arguments[1]) : fs::path{}, preview ? arguments[0] : L"", startup); return app.run();
+    App app(store, settings, preview ? fs::path(arguments[1]) : fs::path{}, preview ? arguments[0] : L"", startup, previewPercent); return app.run();
 }
 }
 int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {

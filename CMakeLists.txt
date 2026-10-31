@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.24)
-project(QuietBoost VERSION 2.2.0 LANGUAGES CXX RC)
+project(QuietBoost VERSION 2.2.1 LANGUAGES CXX RC)
 if(NOT WIN32 OR NOT MSVC)
   message(FATAL_ERROR "QuietBoost requires Windows and the MSVC C++ toolchain.")
 endif()
